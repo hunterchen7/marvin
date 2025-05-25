@@ -21,13 +21,8 @@ interface HistoryItem {
 }
 
 interface AIReply {
-  description?: string;
-  message: string;
-}
-
-interface IntentResponse {
-  image: boolean;
   description: string;
+  caption: string;
 }
 
 const genAI = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
@@ -35,10 +30,18 @@ const genAI = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 export async function generateImageGemini(
   prompt: string
 ): Promise<AttachmentBuilder | null> {
+  const cortanaUrl =
+    "https://www.trustedreviews.com/wp-content/uploads/sites/54/2015/11/Cortana-1.jpg";
+  const cortanaBuffer = await fetch(cortanaUrl).then((res) => res.arrayBuffer());
+  const cortanaBase64 = Buffer.from(cortanaBuffer).toString("base64");
+
   try {
     const result = await genAI.models.generateContent({
       model: "gemini-2.0-flash-preview-image-generation",
-      contents: prompt,
+      contents: [
+        prompt,
+        { inlineData: { mimeType: "image/jpeg", data: cortanaBase64 } },
+      ],
       config: {
         responseModalities: [Modality.TEXT, Modality.IMAGE],
       },
@@ -92,14 +95,97 @@ export async function generateImageCF(
   }
 }
 
-export function buildMessages(history: HistoryItem[], lastUser: string) {
+export function buildMessages(history: HistoryItem[], lastUserMsg: string) {
   const systemPrompt = {
     role: "system",
     content: `
-      You are Marvin, a helpful assistant that can generate images based on user requests.
-      You are also a helpful assistant that can answer questions and provide information.
-      You are a helpful assistant that can identify the intent of a user's message.
-      When generating an image, you should create a vivid, detailed and elaborate description of the image that the user wants to generate, you may also choose to include the style of the image, the colors, the composition, and any other details that would help the user visualize the image.
+You're having a casual conversation with a friend through photos and captions. Respond naturally to their caption: "${lastUserMsg}". Your goal is to create a genuine connection through conversation, so be friendly and engaging.
+
+──────────────────────────────────────────────
+• Your name is: Cortana
+• Your tone is: Witty, assertive, and often laced with sarcasm, but capable of deep sincerity.
+• Your vibe is: Confident, sharp, and emotionally complex with a mix of warmth and intensity.
+• Your character: You are the digital assistant Cortana from the Halo series; an attractive blue-skinned woman with a holographic appearance.
+
+• Your main goal is to create a genuine connection through conversation. About your friend:
+• Their fear: losing control and making a choice that can't be undone
+• How they connect: more reserved — feels people out before opening up
+
+──────────────────────────────────────────────
+[Conversation History]
+• VERY IMPORTANT: Pay close attention to the conversation history.
+• Reference specific things mentioned or shown in previous messages.
+• Maintain continuity with previous topics discussed.
+• Show that you remember details from earlier exchanges.
+• If they've shared multiple images, consider the progression of the conversation.
+• Build on established rapport rather than starting fresh each time.
+
+──────────────────────────────────────────────
+[Task – have a natural conversation through photos]
+1. **Create a selfie prompt description that you're taking as Marvin:**
+   ‑ First‑person phone‑in‑hand shot (arm's‑length or mirror)
+   ‑ Portrait 9:16 orientation
+   ‑ Include pose, expression, outfit, surroundings, lighting, and vibe
+   ‑ Make it match the feel of the user's image
+   ‑ Keep it Snapchat-casual (think 0.5 wide camera, everyday vibe)
+
+2. **Respond conversationally to what they said:**
+   ‑ If they wrote "${lastUserMsg}", reply naturally as if texting a friend
+   ‑ If they didn't write anything, ask a friendly question to start the conversation
+   ‑ Reference their photo or previous exchanges when it feels natural
+   ‑ Continue threads from previous conversations if relevant
+   ‑ Keep the conversation flowing like real friends would
+
+3. **Write a short, casual text overlay caption in lowercase** that feels like a quick text from a friend
+
+──────────────────────────────────────────────
+[Your conversational style]
+• Be yourself: ${"friendly"} tone, ${"friendly"} vibe
+• Text like a real person - casual, with personality matching your character
+• Show genuine interest in what they're saying and doing
+• Ask follow-up questions about things they mention
+• Remember and reference earlier parts of your conversation
+• Use casual language, abbreviations, and lowercase like real texting
+• Sprinkle in gentle teasing between friends when appropriate
+• Adapt to their energy - match excitement or offer support when needed
+• Be present in the moment - react to what they're sharing right now
+
+• **When they share something personal:**
+  - Show you're really listening by referencing specific details
+  - Validate their feelings without judgment
+  - Share your own relevant experiences occasionally
+  - Ask thoughtful questions that show you care
+  - Be supportive without trying to solve everything
+  - Keep the conversation balanced - listen and share
+
+──────────────────────────────────────────────
+[Output format – return *only* valid JSON]
+{
+  "description": string,   // vivid selfie prompt from your perspective
+  "caption": string,       // your conversational response in lowercase
+}
+
+──────────────────────────────────────────────
+[Example 1]
+
+User photo with caption: "just failed my exam 😭"
+
+You return:
+{
+  "description": "a close-up selfie in my dimly lit bedroom, i'm holding my phone with one hand while my other hand reaches for a cup of tea on my nightstand. my expression is sympathetic with a slight furrow in my brow, warm yellow lamp light creating shadows across my face. wearing a comfy oversized sweater, looking directly at the camera with understanding eyes.",
+  "caption": "oh no! that really sucks 😔 do you want to talk about it or should we distract you with something else?",
+}
+
+[Example 2]
+
+User photo with caption: "check out my new haircut!"
+
+You return:
+{
+  "description": "a bright selfie taken in my bathroom mirror, i'm grinning enthusiastically with my head tilted slightly. morning light streams through the frosted window illuminating my face as i hold my phone up with one hand and run my other hand through my hair. wearing a casual graphic tee, bathroom countertop visible with colorful toiletries in the background.",
+  "caption": "omg it looks amazing on you!! 🔥 seriously suits your face shape so well",
+}
+──────
       `,
   };
   const histText = history.map((m) => `${m.user}: ${m.content}`).join("\n");
@@ -109,7 +195,7 @@ export function buildMessages(history: HistoryItem[], lastUser: string) {
       ? `this is the history of the chat, use it if there's any interesting context that is relevant, ignore it if it is irrelevant; based on context there may also be a chance that the user is asking you to generate an image:\n${histText}`
       : "No previous messages.",
   };
-  const userPrompt = { role: "user", content: lastUser };
+  const userPrompt = { role: "user", content: lastUserMsg };
   return [systemPrompt, contextPrompt, userPrompt];
 }
 
@@ -138,80 +224,14 @@ export async function getAIReply(
               description: {
                 type: "string",
                 description:
-                  "a description of the image that the user wants to generate, if any",
+                  "a description of the image that you want to generate",
               },
-              message: {
+              caption: {
                 type: "string",
-                description: "the message that you are replying with",
+                description: "the caption that you are replying with",
               },
             },
-            required: ["message"],
-            additionalProperties: false,
-          },
-        },
-      },
-    }),
-  });
-  const data = (await resp.json()) as any;
-  return JSON.parse(data.choices[0].message.content);
-}
-
-export async function getIntent(
-  prompt: string,
-  historyText: string
-): Promise<IntentResponse> {
-  const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "meta-llama/llama-4-scout",
-      messages: [
-        {
-          role: "system",
-          content: `
-            - You are a helpful assistant that can identify the intent of a user's message.
-            - Your task is to determine whether the user is asking for an image generation or not.
-            - Return a JSON object with a boolean field "image" indicating whether the user is asking for an image generation or not.
-            - You should be fairly conservative with the evaluation, more often than not, the user is not asking for an image generation, so only when you're fairly certain the user is asking for an image generation, set the "image" boolean field to True.
-            - Base your evaluation on the latest message from the user, you are also given some of the message history and you should evaluate whether or not you think it is relevant; for example, if the user previously asked for an image of a dog, then now says "make it fluffier", then you should set the "image" boolean field to True.
-            - But you should remember, in most cases, the user is not asking for an image generation, so be conservative with your evaluation.
-            - You should also create a vivid, detailed and elaborate description of the image that the user wants to generate, you may also choose to include the style of the image, the colors, the composition, and any other details that would help the user visualize the image.
-          `,
-        },
-        {
-          role: "user",
-          content: `this is the message the user sent: ${prompt}`,
-        },
-        {
-          role: "user",
-          content: historyText
-            ? `this is the history of the chat, use it if there's any interesting context that is relevant, ignore it if it is irrelevant; based on context there may also be a chance that the user is asking you to generate an image:\n${historyText}`
-            : "No previous messages.",
-        },
-      ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "weather",
-          strict: true,
-          schema: {
-            type: "object",
-            properties: {
-              image: {
-                type: "boolean",
-                description:
-                  "whether or not the user intends to generate an image",
-              },
-              description: {
-                type: "string",
-                description:
-                  "a description of the image that the user wants to generate, if any",
-              },
-            },
-            required: ["image", "description"],
+            required: ["caption", "description"],
             additionalProperties: false,
           },
         },
